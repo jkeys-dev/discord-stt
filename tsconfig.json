@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    // "noImplicitAny": true,
+    "removeComments": true,
+    "preserveConstEnums": true,
+    "sourceMap": true,
+    "moduleResolution":"node",
+    "allowSyntheticDefaultImports": true,
+    "outDir": "build"
+  },
+  "moduleResolution":"node",
+  "include": ["src/*.ts"],
+  "exclude": ["node_modules"]
+}
