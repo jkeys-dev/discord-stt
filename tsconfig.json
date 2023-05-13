@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "commonjs",
+    "module": "ES2015",
     // "noImplicitAny": true,
     "removeComments": true,
     "preserveConstEnums": true,
@@ -10,7 +10,7 @@
     "allowSyntheticDefaultImports": true,
     "outDir": "build"
   },
-  "moduleResolution":"node",
-  "include": ["src/*.ts"],
-  "exclude": ["node_modules"]
+  "moduleResolution":"NodeNext",
+  "include": ["src/*.ts", "src/utils.mts"],
+  "exclude": ["node_modules", "build"]
 }
