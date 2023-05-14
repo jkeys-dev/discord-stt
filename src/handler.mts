@@ -1,27 +1,34 @@
-import { VoiceReceiver } from '@discordjs/voice'
+import { TextChannel, VoiceChannel } from 'discord.js'
+import { AudioReceiveStream, VoiceReceiver } from '@discordjs/voice'
 import { chunkSize, frameDuration, minNoisyFrames } from './constants.mjs'
 import { client } from './app.mjs'
 import assert from 'assert'
 import { log, transcodeAndSave } from './utils.mjs'
 import { generateSilentOpusPacket, getEncoder } from './encoder.mjs'
+import { insertUserToTranscription } from './state.mjs'
 
 const startedBySpeaker = {}
 
-export function getUserConnectedHandler(receiver: VoiceReceiver, targetTextChannel: any) {
+function getSpeakerHashKey(voiceChannelId: string, username: string) {
+  return `${voiceChannelId}:${username}`
+}
+
+export function getUserConnectedHandler(receiver: VoiceReceiver, targetTextChannel: TextChannel, voiceChannel: VoiceChannel) {
   assert(!!client.user, 'did not find user for bot')
   const silentOpusPacket = generateSilentOpusPacket()
 
   return async function handleUserConnected(userId: string) {
     const user = client.users.cache.get(userId)
     assert(user, 'did not find broadcasting user')
-    if (startedBySpeaker[user.username]) {
+    const speakerHashKey = getSpeakerHashKey(voiceChannel.id, user.username)
+    if (startedBySpeaker[speakerHashKey]) {
       return
     }
-    startedBySpeaker[user.username] = true
+    startedBySpeaker[speakerHashKey] = true
     log(`listening to input from user ${user.username}`)
 
-    const stream = receiver.subscribe(userId)
 
+    // closure variables that represent the state for a given user
     let checkMissingPacketsInterval: NodeJS.Timer
     let packets: Buffer[] = []
     let bufferLength = 0
@@ -30,6 +37,19 @@ export function getUserConnectedHandler(receiver: VoiceReceiver, targetTextChann
     let transcoding = false
     let talking = false
     let idx = 0
+    let username: string | undefined
+    let stream: AudioReceiveStream | undefined
+
+    async function handlePacket(opusPacket) {
+      talking = true
+      numNoisyFrames++
+      lastPacketTimestamp = Date.now()
+      const decoded = getEncoder().decode(opusPacket)
+      bufferLength += decoded.length
+      packets.push(decoded)
+    }
+
+    stream = receiver.subscribe(userId)
 
     async function infer() {
       transcoding = true
@@ -61,19 +81,16 @@ export function getUserConnectedHandler(receiver: VoiceReceiver, targetTextChann
       }
     }, frameDuration) // Check every 20ms
 
-    stream.on('data', async (opusPacket) => {
-      talking = true
-      numNoisyFrames++
-      lastPacketTimestamp = Date.now()
-      const decoded = getEncoder().decode(opusPacket)
-      bufferLength += decoded.length
-      packets.push(decoded)
-    })
+    function stop() {
+      log(`${username} disconnected from ${targetTextChannel.id}`)
+      startedBySpeaker[speakerHashKey] = undefined
+      stream.off('data', handlePacket)
+      stream.off('end', stop)
+    }
 
-    stream.on('end', () => {
-      log(`${user.username}'s audio stream has ended`)
-      clearInterval(checkMissingPacketsInterval)
-      startedBySpeaker[user.username] = false
-    })
+    await insertUserToTranscription(voiceChannel, user.id, stop)
+
+    stream.on('data', handlePacket)
+    stream.on('end', stop)
   }
 }

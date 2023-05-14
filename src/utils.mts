@@ -1,7 +1,8 @@
 import fs from 'fs'
 import { Readable } from 'stream'
 import ffmpeg from 'fluent-ffmpeg'
-import { TextChannel } from 'discord.js'
+import { GuildMember, TextChannel } from 'discord.js'
+import { APIInteractionGuildMember } from '@discordjs/core'
 import { joinVoiceChannel, VoiceConnectionStatus, entersState } from '@discordjs/voice'
 import { spawn } from 'child_process'
 import { modelSize } from './constants.mjs'
@@ -42,6 +43,13 @@ export async function connectToVoiceChannel(channel) {
     connection.destroy()
     throw err
   }
+}
+
+/**
+ * no idea if this is correct yet
+ */
+export function isGuildMember(member: GuildMember | APIInteractionGuildMember): member is GuildMember {
+  return !member.user.bot
 }
 
 // transcription / whisper utils
