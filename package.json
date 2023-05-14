@@ -2,7 +2,7 @@
   "name": "whisper-discord",
   "version": "1.0.0",
   "description": "",
-  "main": "app.js",
+  "main": "app.mjs",
   "type": "module",
   "scripts": {
     "build": "yarn tsc",

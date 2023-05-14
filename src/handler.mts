@@ -1,53 +1,19 @@
-import { config } from 'dotenv'
-config()
-
-import assert from 'assert'
-import { Client } from 'discord.js'
-import { GatewayIntentBits } from '@discordjs/core'
-import { createAudioPlayer } from '@discordjs/voice'
-import {
-  connectToVoiceChannel,
-  createCacheDirIfNotExists,
-  log,
-  transcodeAndSave,
-} from './utils.mjs'
+import { VoiceReceiver } from '@discordjs/voice'
 import { chunkSize, frameDuration } from './constants.mjs'
-import { initEncoder, getEncoder, generateSilentOpusPacket } from './encoder.mjs'
+import { client } from './app.mjs'
+import assert from 'assert'
+import { log, transcodeAndSave } from './utils.mjs'
+import { generateSilentOpusPacket, getEncoder } from './encoder.mjs'
 
-createCacheDirIfNotExists()
-initEncoder()
-
-let targetTextChannel
-const token = process.env.DISCORD_TOKEN!
-const targetVoiceChannelId = process.env.TARGET_VOICE_CHANNEL_ID!
-const targetTextChannelId = process.env.TARGET_TEXT_CHANNEL_ID!
 const startedBySpeaker = {}
-const silentOpusPacket = generateSilentOpusPacket()
 
-const client = new Client({
-  intents: [GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.Guilds],
-})
-
-client.on('ready', async () => {
+export function getUserConnectedHandler(receiver: VoiceReceiver, targetTextChannel: any) {
   assert(!!client.user, 'did not find user for bot')
-  log(`Logged in as ${client.user.tag}!`)
+  const silentOpusPacket = generateSilentOpusPacket()
 
-  const targetChannel = client.channels.cache.get(targetVoiceChannelId)
-  targetTextChannel = client.channels.cache.get(targetTextChannelId)
-  assert(!!targetChannel, 'target voice channel id not found')
-
-  const connection = await connectToVoiceChannel(targetChannel)
-  const audioPlayer = createAudioPlayer()
-
-  connection.subscribe(audioPlayer)
-  connection.on('error', console.error)
-  connection.on('stateChange', (oldState: any, newState: any) => {
-    log(`Connection state changed from ${oldState.status} to ${newState.status}`)
-  })
-
-  const receiver = connection.receiver
-  receiver.speaking.on('start', async (userId) => {
+  return async function handleUserConnected(userId: string) {
     const user = client.users.cache.get(userId)
+    assert(user, 'did not find broadcasting user')
     if (startedBySpeaker[user.username]) {
       return
     }
@@ -65,6 +31,7 @@ client.on('ready', async () => {
 
     async function infer() {
       transcoding = true
+      assert(user, 'did not find broadcasting user')
       log('transcoding and saving')
       const copy = Buffer.concat([buffer])
       buffer = Buffer.alloc(0)
@@ -103,7 +70,5 @@ client.on('ready', async () => {
       clearInterval(checkMissingPacketsInterval)
       startedBySpeaker[user.username] = false
     })
-  })
-})
-
-client.login(token)
+  }
+}
