@@ -6,3 +6,6 @@ export const chunkDuration = 5 // seconds
 export const chunkSize = chunkDuration * sampleRate * channels * bytesPerSample
 
 export const modelSize = 'base.en'
+
+// the minimum number of frames that are non-silent in order to transcribe
+export const minNoisyFrames = 50

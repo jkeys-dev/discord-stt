@@ -1,6 +1,4 @@
 import { config } from 'dotenv'
-config()
-
 import assert from 'assert'
 import { Client } from 'discord.js'
 import { GatewayIntentBits } from '@discordjs/core'
@@ -8,6 +6,8 @@ import { createAudioPlayer } from '@discordjs/voice'
 import { connectToVoiceChannel, createCacheDirIfNotExists, log } from './utils.mjs'
 import { initEncoder } from './encoder.mjs'
 import { getUserConnectedHandler } from './handler.mjs'
+
+config()
 
 const token = process.env.DISCORD_TOKEN!
 const targetVoiceChannelId = process.env.TARGET_VOICE_CHANNEL_ID!

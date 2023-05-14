@@ -1,9 +1,10 @@
 import fs from 'fs'
 import { Readable } from 'stream'
 import ffmpeg from 'fluent-ffmpeg'
-import { modelSize } from './constants.mjs'
+import { TextChannel } from 'discord.js'
 import { joinVoiceChannel, VoiceConnectionStatus, entersState } from '@discordjs/voice'
 import { spawn } from 'child_process'
+import { modelSize } from './constants.mjs'
 
 export function createCacheDirIfNotExists() {
   try {
@@ -96,28 +97,19 @@ export async function getWhisperResults(outputFile: string): Promise<string | un
   return json.text as string
 }
 
-
 const transcodingByUser = {}
-export async function transcodeAndSave(buffer: Buffer, outputFile: string, user: string, targetTextChannel: any) {
+export async function transcodeAndSave(buf: Buffer, outputFile: string, user: string, targetTextChannel: TextChannel) {
   const path = `.app-cache/${outputFile}`
-  // if (transcodingByUser[user]) {
-  //   console.warn('already transcoding for user, discarding buffer')
-  //   return
-  // }
-
   transcodingByUser[user] = true
-  try {
-    // fs.rmSync(`${outputFile.split('.')[0]}.json`, { force: true })
 
-    await saveIntermediateFile(path, buffer)
+  try {
+    await saveIntermediateFile(path, buf)
     await transcribe(path)
     const text = await getWhisperResults(outputFile)
 
     if (text) {
-      const now = new Date()
-      const formattedDate = `${now.getHours()}:${now.getMinutes()}`
       await targetTextChannel.send({
-        content: `${user}: ${text}\n @ ${formattedDate}`,
+        content: `${user}: ${text}`,
         tts: false,
       })
     }

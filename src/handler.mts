@@ -1,5 +1,5 @@
 import { VoiceReceiver } from '@discordjs/voice'
-import { chunkSize, frameDuration } from './constants.mjs'
+import { chunkSize, frameDuration, minNoisyFrames } from './constants.mjs'
 import { client } from './app.mjs'
 import assert from 'assert'
 import { log, transcodeAndSave } from './utils.mjs'
@@ -23,7 +23,9 @@ export function getUserConnectedHandler(receiver: VoiceReceiver, targetTextChann
     const stream = receiver.subscribe(userId)
 
     let checkMissingPacketsInterval: NodeJS.Timer
-    let buffer = Buffer.alloc(0)
+    let packets: Buffer[] = []
+    let bufferLength = 0
+    let numNoisyFrames = 0 // the # of non-silent frames in a buffering period
     let lastPacketTimestamp = Date.now()
     let transcoding = false
     let talking = false
@@ -33,9 +35,11 @@ export function getUserConnectedHandler(receiver: VoiceReceiver, targetTextChann
       transcoding = true
       assert(user, 'did not find broadcasting user')
       log('transcoding and saving')
-      const copy = Buffer.concat([buffer])
-      buffer = Buffer.alloc(0)
-      await transcodeAndSave(copy, `${user.username}_${idx++}_chunk.wav`, user.username, targetTextChannel)
+      const audioBuffer = Buffer.concat(packets)
+      packets = []
+      bufferLength = 0
+      numNoisyFrames = 0
+      await transcodeAndSave(audioBuffer, `${user.username}_${idx++}_chunk.wav`, user.username, targetTextChannel)
       transcoding = false
     }
 
@@ -44,27 +48,28 @@ export function getUserConnectedHandler(receiver: VoiceReceiver, targetTextChann
       if (Date.now() - lastPacketTimestamp > frameDuration) {
         // Insert a silent Opus packet
         const decoded = getEncoder().decode(silentOpusPacket)
-        buffer = Buffer.concat([buffer, decoded])
+        bufferLength += decoded.length
+        packets.push(decoded)
       }
 
-      if (Date.now() - lastPacketTimestamp > 500) {
+      if (Date.now() - lastPacketTimestamp > 800) {
         talking = false
       }
 
-      if (buffer.length >= chunkSize && !transcoding && !talking) {
+      if (bufferLength >= chunkSize && !transcoding && !talking && numNoisyFrames >= minNoisyFrames) {
         await infer()
       }
     }, frameDuration) // Check every 20ms
 
     stream.on('data', async (opusPacket) => {
       talking = true
+      numNoisyFrames++
       lastPacketTimestamp = Date.now()
       const decoded = getEncoder().decode(opusPacket)
-      buffer = Buffer.concat([buffer, decoded])
-      if (buffer.length >= chunkSize && !transcoding && !talking) {
-        await infer()
-      }
+      bufferLength += decoded.length
+      packets.push(decoded)
     })
+
     stream.on('end', () => {
       log(`${user.username}'s audio stream has ended`)
       clearInterval(checkMissingPacketsInterval)

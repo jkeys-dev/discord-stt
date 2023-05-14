@@ -18,10 +18,8 @@ export function getEncoder() {
 }
 
 export function generateSilentOpusPacket() {
-  // 960 samples of silence in a 48kHz, 2-channel PCM buffer
-  // const silentPcmChunk = Buffer.alloc(960 * 2 * 2, 0);
-  // 480 samples of silence in a 48kHz, 1-channel PCM buffer
-  const silentPcmChunk = Buffer.alloc(480 * 2 * 2, 0)
+  // 960 samples of silence in a 48kHz, 1-channel PCM buffer
+  const silentPcmChunk = Buffer.alloc(960 * 1 * 2, 0)
 
   // Encode the silent PCM buffer as an Opus packet
   const silentOpusPacket = getEncoder().encode(silentPcmChunk)
