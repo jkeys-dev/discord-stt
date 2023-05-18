@@ -1,9 +1,14 @@
+import os
 import requests
+from dotenv import load_dotenv
 
-# TODO: don't be lazy, and import this from .env
-url = "https://discord.com/api/v10/applications/<application id>/commands"
+load_dotenv()
 
-# This is an example CHAT_INPUT or Slash Command, with a type of 1
+bot_token = os.getenv('DISCORD_BOT_TOKEN')
+application_id = os.getenv('DISCORD_APPLICATION_ID')
+
+url = f"https://discord.com/api/v10/applications/{application_id}/commands"
+
 json = {
     "name": "start",
     "type": 1,
@@ -16,10 +21,8 @@ json2 = {
     "description": "End transcription in the voice channel that you are connected to",
 }
 
-# For authorization, you can use your bot token
-# TODO: don't be lazy, and import this from .env
 headers = {
-    "Authorization": "Bot <bot token>"
+    "Authorization": f"Bot {bot_token}"
 }
 
 r = requests.post(url, headers=headers, json=json)
