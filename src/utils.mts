@@ -1,9 +1,9 @@
 import fs from 'fs'
 import { Readable } from 'stream'
 import ffmpeg from 'fluent-ffmpeg'
-import { GuildMember, TextChannel } from 'discord.js'
+import { GuildMember, TextChannel, VoiceChannel } from 'discord.js'
 import { APIInteractionGuildMember } from '@discordjs/core'
-import { joinVoiceChannel, VoiceConnectionStatus, entersState } from '@discordjs/voice'
+import { joinVoiceChannel, VoiceConnectionStatus, entersState, VoiceConnection } from '@discordjs/voice'
 import { spawn } from 'child_process'
 import { modelSize } from './constants.mjs'
 
@@ -19,6 +19,14 @@ export function createCacheDirIfNotExists() {
 
 export function log(...args: any[]) {
   console.log('Discord STT |', ...args)
+}
+
+export function warn(...args: any[]) {
+  console.warn('Discord STT |', ...args)
+}
+
+export function error(...args: any[]) {
+  console.error('Discord STT |', ...args)
 }
 
 export function sum(xs: number[]) {
@@ -39,12 +47,20 @@ export async function connectToVoiceChannel(channel) {
     await entersState(connection, VoiceConnectionStatus.Ready, 20e3)
     return connection
   } catch (err) {
-    console.error('failed to connect to voice channel')
+    error('failed to connect to voice channel')
     connection.destroy()
     throw err
   }
 }
 
+export async function disconnectFromVoiceChannel(connection: VoiceConnection) {
+  try {
+    await entersState(connection, VoiceConnectionStatus.Disconnected, 20e3)
+  } catch (err) {
+    error('failed to disconnect from voice channel')
+    throw err
+  }
+}
 /**
  * no idea if this is correct yet
  */
@@ -102,6 +118,7 @@ export async function getWhisperResults(outputFile: string): Promise<string | un
     return
   }
 
+  fs.rmSync(resultPath)
   return json.text as string
 }
 

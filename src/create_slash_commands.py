@@ -16,9 +16,9 @@ json = {
 }
 
 json2 = {
-    "name": "end",
+    "name": "stop",
     "type": 1,
-    "description": "End transcription in the voice channel that you are connected to",
+    "description": "Stop transcription in the voice channel that you are connected to",
 }
 
 headers = {

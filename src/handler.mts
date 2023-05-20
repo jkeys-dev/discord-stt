@@ -6,6 +6,7 @@ import assert from 'assert'
 import { log, transcodeAndSave } from './utils.mjs'
 import { generateSilentOpusPacket, getEncoder } from './encoder.mjs'
 import { insertUserToTranscription } from './state.mjs'
+import fs from 'fs'
 
 const startedBySpeaker = {}
 
@@ -59,8 +60,10 @@ export function getUserConnectedHandler(receiver: VoiceReceiver, targetTextChann
       packets = []
       bufferLength = 0
       numNoisyFrames = 0
-      await transcodeAndSave(audioBuffer, `${user.username}_${idx++}_chunk.wav`, user.username, targetTextChannel)
+      const audioPath = `${user.username}_${idx++}_chunk.wav`
+      await transcodeAndSave(audioBuffer, audioPath, user.username, targetTextChannel)
       transcoding = false
+      fs.rmSync(audioPath)
     }
 
     checkMissingPacketsInterval = setInterval(async () => {
@@ -82,7 +85,7 @@ export function getUserConnectedHandler(receiver: VoiceReceiver, targetTextChann
     }, frameDuration) // Check every 20ms
 
     function stop() {
-      log(`${username} disconnected from ${targetTextChannel.id}`)
+      log(`$stopped listening to ${username} in ${targetTextChannel.name}`)
       startedBySpeaker[speakerHashKey] = undefined
       stream.off('data', handlePacket)
       stream.off('end', stop)

@@ -1,4 +1,4 @@
-import {TextChannel, VoiceChannel} from 'discord.js'
+import { VoiceConnection } from "@discordjs/voice"
 
 export type VoiceChannelId = string & {}
 export type TextChannelId = string & {}
@@ -14,4 +14,5 @@ export interface TranscriptionMetadata {
   voiceChannelId: VoiceChannelId
   textChannelId: TextChannelId
   users: Record<UserId, User>
+  connection: VoiceConnection
 }

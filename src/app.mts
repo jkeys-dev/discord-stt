@@ -3,7 +3,7 @@ import assert from 'assert'
 import { Client, TextChannel, VoiceChannel } from 'discord.js'
 import { GatewayIntentBits } from '@discordjs/core'
 import { createAudioPlayer } from '@discordjs/voice'
-import { connectToVoiceChannel, createCacheDirIfNotExists, isGuildMember, log } from './utils.mjs'
+import { connectToVoiceChannel, createCacheDirIfNotExists, disconnectFromVoiceChannel, isGuildMember, log } from './utils.mjs'
 import { initEncoder } from './encoder.mjs'
 import { getUserConnectedHandler } from './handler.mjs'
 import { VoiceChannelId } from './types.mjs'
@@ -12,6 +12,7 @@ import { insertTranscription, removeTranscription } from './state.mjs'
 config()
 
 const token = process.env.DISCORD_TOKEN!
+const botName = process.env.BOT_NAME!
 
 export const client = new Client({
   intents: [GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.Guilds],
@@ -31,7 +32,6 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   const { commandName } = interaction
-
   if (commandName === 'start') {
     // Get the voice channel of the user who sent the command
     if (!isGuildMember(interaction.member)) {
@@ -39,7 +39,6 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     const voiceChannel = interaction.member.voice.channel as VoiceChannel
-
     if (!voiceChannel) {
       await interaction.reply('Discord STT | Please join a voice channel first!')
       return
@@ -47,36 +46,33 @@ client.on('interactionCreate', async (interaction) => {
 
     await interaction.reply('Discord STT | Starting transcription in your voice channel!')
 
-    const connection = await connectToVoiceChannel(voiceChannel)
-    const { receiver } = connection
-
-    // Get the text channel where the command was issued
     const targetTextChannel = interaction.channel as TextChannel
+    const connection = await connectToVoiceChannel(voiceChannel)
 
     // Start transcription
-    const handleUserConnected = getUserConnectedHandler(receiver, targetTextChannel, voiceChannel)
+    const handleUserConnected = getUserConnectedHandler(connection.receiver, targetTextChannel, voiceChannel)
 
-    await insertTranscription(voiceChannel, targetTextChannel)
+    // store metadata for proper cleanup
+    insertTranscription(voiceChannel, targetTextChannel, connection)
 
-    receiver.speaking.on('start', handleUserConnected)
+    connection.receiver.speaking.on('start', handleUserConnected)
     for (const [userId] of voiceChannel.members) {
       handleUserConnected(userId)
     }
-
-  } else if (commandName === 'end') {
+  } else if (commandName === 'stop') {
     // Get the voice channel of the user who sent the command
     if (!isGuildMember(interaction.member)) {
       return
     }
 
     const voiceChannel = interaction.member.voice.channel as VoiceChannel
-
     if (!voiceChannel) {
       await interaction.reply('Discord STT | Please join a voice channel first!')
       return
     }
 
-    await removeTranscription(voiceChannel)
+    // disconnect and remove information about this interaction from local state
+    removeTranscription(voiceChannel)
     await interaction.reply('Discord STT | Stopped transcription in your voice channel!')
   }
 })
