@@ -27,7 +27,7 @@ Find the channel ids and paste them into your environment token. Also, create a 
 
 Invite your bot to your discord server with the environment variables configured correctly, then run the program.
 
-https://discord.com/api/oauth2/authorize?client_id=<client_id>&permissions=<permission_integer>&scope=bot%20applications.commands
+URL to invite the bot: `https://discord.com/api/oauth2/authorize?client_id=<client_id>&permissions=<permission_integer>&scope=bot%20applications.commands`
 
 ```
 # bare metal
