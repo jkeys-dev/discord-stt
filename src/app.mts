@@ -1,18 +1,16 @@
-import { config } from 'dotenv'
+import { GatewayIntentBits } from '@discordjs/core'
+import { OpusEncoder } from '@discordjs/opus'
 import assert from 'assert'
 import { Client, TextChannel, VoiceChannel } from 'discord.js'
-import { GatewayIntentBits } from '@discordjs/core'
-import { createAudioPlayer } from '@discordjs/voice'
-import { connectToVoiceChannel, createCacheDirIfNotExists, disconnectFromVoiceChannel, isGuildMember, log } from './utils.mjs'
-import { initEncoder } from './encoder.mjs'
+import { config } from 'dotenv'
+import { channels, sampleRate } from './constants.mjs'
 import { getUserConnectedHandler } from './handler.mjs'
-import { VoiceChannelId } from './types.mjs'
 import { insertTranscription, removeTranscription } from './state.mjs'
+import { connectToVoiceChannel, createCacheDirIfNotExists, isGuildMember, log } from './utils.mjs'
 
 config()
 
 const token = process.env.DISCORD_TOKEN!
-const botName = process.env.BOT_NAME!
 
 export const client = new Client({
   intents: [GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.Guilds],
@@ -20,7 +18,6 @@ export const client = new Client({
 
 client.on('ready', async () => {
   createCacheDirIfNotExists()
-  initEncoder()
 
   assert(!!client.user, 'did not find user for bot')
   log(`Logged in as ${client.user.tag}!`)

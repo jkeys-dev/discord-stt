@@ -1,10 +1,10 @@
+import { APIInteractionGuildMember } from '@discordjs/core'
+import { VoiceConnection, VoiceConnectionStatus, entersState, joinVoiceChannel } from '@discordjs/voice'
+import { spawn } from 'child_process'
+import { GuildMember, TextChannel } from 'discord.js'
+import ffmpeg from 'fluent-ffmpeg'
 import fs from 'fs'
 import { Readable } from 'stream'
-import ffmpeg from 'fluent-ffmpeg'
-import { GuildMember, TextChannel, VoiceChannel } from 'discord.js'
-import { APIInteractionGuildMember } from '@discordjs/core'
-import { joinVoiceChannel, VoiceConnectionStatus, entersState, VoiceConnection } from '@discordjs/voice'
-import { spawn } from 'child_process'
 import { modelSize } from './constants.mjs'
 
 export function createCacheDirIfNotExists() {
@@ -118,7 +118,6 @@ export async function getWhisperResults(outputFile: string): Promise<string | un
     return
   }
 
-  fs.rmSync(resultPath)
   return json.text as string
 }
 

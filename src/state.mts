@@ -1,7 +1,7 @@
+import { VoiceConnection } from '@discordjs/voice'
+import assert from 'assert'
 import { TextChannel, VoiceChannel } from 'discord.js'
 import { TranscriptionMetadata } from './types.mjs'
-import assert from 'assert'
-import { VoiceConnection } from '@discordjs/voice'
 import { disconnectFromVoiceChannel } from './utils.mjs'
 
 const transcriptionMetadatasByVoiceChannelId: Record<string, TranscriptionMetadata | undefined> = {}
