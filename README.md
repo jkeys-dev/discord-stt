@@ -21,7 +21,7 @@ pip install python-dotenv
 python create_slash_commands.py # or, `python3 create_slash_commands.py`
 ```
 
-Find the channel ids and paste them into your environment token. Also, create a Discord bot and paste the bot's token in.
+Find the channel ids and paste them into your `.env` file. Also, create a Discord bot and paste the bot's token in.
 
 ## Usage
 
