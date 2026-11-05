@@ -1,21 +1,25 @@
 import { APIInteractionGuildMember } from '@discordjs/core'
-import { VoiceConnection, VoiceConnectionStatus, entersState, joinVoiceChannel } from '@discordjs/voice'
-import { spawn } from 'child_process'
-import { GuildMember, TextChannel } from 'discord.js'
-import ffmpeg from 'fluent-ffmpeg'
-import fs from 'fs'
-import { Readable } from 'stream'
-import { modelSize } from './constants.mjs'
-
-export function createCacheDirIfNotExists() {
-  try {
-    fs.mkdirSync('./.app-cache')
-  } catch (e: any) {
-    if (!fs.existsSync('./.app-cache')) {
-      throw new Error('could not create .app-cache folder and it does not exist')
-    }
-  }
-}
+import {
+  VoiceConnection,
+  VoiceConnectionStatus,
+  entersState,
+  joinVoiceChannel,
+} from '@discordjs/voice'
+import { GuildMember, TextChannel, VoiceChannel } from 'discord.js'
+import { saveTranscription } from './db.mjs'
+import {
+  NewTranscriptionRecordSchema,
+  Pcm16kMonoBuffer,
+  Pcm16kMonoBufferSchema,
+  SpeakerContext,
+  SpeakerContextSchema,
+  TextChannelIdSchema,
+  TranscriptText,
+  TranscriptTextSchema,
+  WhisperOutput,
+  WhisperOutputSchema,
+} from './types.mjs'
+import { transcribePcm16kMono } from './whisper.mjs'
 
 export function log(...args: any[]) {
   console.log('Discord STT |', ...args)
@@ -30,12 +34,12 @@ export function error(...args: any[]) {
 }
 
 export function sum(xs: number[]) {
-  return xs.reduce((sum, val) => sum + val, 0.0)
+  return xs.reduce((acc, val) => acc + val, 0.0)
 }
 
 // discord utils
 
-export async function connectToVoiceChannel(channel) {
+export async function connectToVoiceChannel(channel: VoiceChannel): Promise<VoiceConnection> {
   const connection = joinVoiceChannel({
     channelId: channel.id,
     guildId: channel.guild.id,
@@ -53,91 +57,71 @@ export async function connectToVoiceChannel(channel) {
   }
 }
 
-export async function disconnectFromVoiceChannel(connection: VoiceConnection) {
+export function disconnectFromVoiceChannel(connection: VoiceConnection) {
   try {
-    await entersState(connection, VoiceConnectionStatus.Disconnected, 20e3)
+    if (connection.state.status !== VoiceConnectionStatus.Destroyed) {
+      connection.destroy()
+    }
   } catch (err) {
-    error('failed to disconnect from voice channel')
-    throw err
+    error('failed to disconnect from voice channel', err)
   }
 }
-/**
- * no idea if this is correct yet
- */
-export function isGuildMember(member: GuildMember | APIInteractionGuildMember): member is GuildMember {
-  return !member.user.bot
+
+export function isGuildMember(
+  member: GuildMember | APIInteractionGuildMember | null
+): member is GuildMember {
+  return Boolean(member && 'voice' in member && !member.user.bot)
 }
 
 // transcription / whisper utils
 
-export function getWhisperArgs(path: string) {
-  const args = [
-    '--output_dir',
-    './.app-cache',
-    '--language',
-    'en',
-    '--task',
-    'transcribe',
-    '--model',
-    modelSize,
-    '--output_format',
-    'json',
-    path,
-  ] as const
-
-  return args
-}
-
-export async function saveIntermediateFile(path: string, buffer: Buffer) {
-  await new Promise((resolve, reject) => {
-    return ffmpeg(Readable.from(buffer))
-      .inputFormat('s16le')
-      .audioBitrate('16k')
-      .saveToFile(path)
-      .on('end', resolve)
-      .on('error', reject)
-  })
-}
-
-export async function transcribe(audioPath: string) {
-  const args = getWhisperArgs(audioPath)
-  await new Promise((resolve, reject) => {
-    return spawn('whisper', args, { shell: true }).on('exit', resolve).on('error', reject)
-  })
-}
-
-export async function getWhisperResults(outputFile: string): Promise<string | undefined> {
-  const resultPath = `.app-cache/${outputFile.split('.')[0]}.json`
-  const json = await JSON.parse(fs.readFileSync(resultPath, 'utf-8'))
+export function extractTranscriptText(output: WhisperOutput): TranscriptText | undefined {
+  const validOutput = WhisperOutputSchema.parse(output)
 
   const avgNoSpeechProb =
-    json.segments.length > 0 ? sum(json.segments.map((seg) => seg.no_speech_prob)) / json.segments.length : 1.0
+    validOutput.segments.length > 0
+      ? sum(validOutput.segments.map((seg) => seg.no_speech_prob)) / validOutput.segments.length
+      : 1.0
 
   if (avgNoSpeechProb > 0.6) {
     log('probably not speaking, not sending to channel')
-    return
+    return undefined
   }
 
-  return json.text as string
+  const textResult = TranscriptTextSchema.safeParse(validOutput.text)
+  return textResult.success ? textResult.data : undefined
 }
 
-const transcodingByUser = {}
-export async function transcodeAndSave(buf: Buffer, outputFile: string, user: string, targetTextChannel: TextChannel) {
-  const path = `.app-cache/${outputFile}`
-  transcodingByUser[user] = true
+export async function transcodeAndSave(
+  buf: Pcm16kMonoBuffer,
+  speaker: SpeakerContext,
+  targetTextChannel: TextChannel
+) {
+  const validBuffer = Pcm16kMonoBufferSchema.parse(buf)
+  const validSpeaker = SpeakerContextSchema.parse(speaker)
+  const textChannelId = TextChannelIdSchema.parse(targetTextChannel.id)
 
-  try {
-    await saveIntermediateFile(path, buf)
-    await transcribe(path)
-    const text = await getWhisperResults(outputFile)
+  const whisperOutput = await transcribePcm16kMono(validBuffer)
+  const text = extractTranscriptText(whisperOutput)
 
-    if (text) {
-      await targetTextChannel.send({
-        content: `${user}: ${text}`,
-        tts: false,
+  if (text) {
+    await targetTextChannel.send({
+      content: `${validSpeaker.username}: ${text}`,
+      tts: false,
+    })
+
+    try {
+      const record = NewTranscriptionRecordSchema.parse({
+        guildId: validSpeaker.guildId,
+        voiceChannelId: validSpeaker.voiceChannelId,
+        textChannelId,
+        userId: validSpeaker.userId,
+        username: validSpeaker.username,
+        content: text,
       })
+      await saveTranscription(record)
+    } catch (dbErr) {
+      error('failed to save transcription to PostgreSQL', dbErr)
     }
-  } finally {
-    transcodingByUser[user] = false
   }
 }

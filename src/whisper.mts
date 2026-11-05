@@ -1,0 +1,138 @@
+import { ChildProcessWithoutNullStreams, spawn } from 'child_process'
+import fs from 'fs'
+import path from 'path'
+import readline from 'readline'
+import { fileURLToPath } from 'url'
+import { modelSize } from './constants.mjs'
+import {
+  Pcm16kMonoBuffer,
+  Pcm16kMonoBufferSchema,
+  WhisperModelSchema,
+  WhisperOutput,
+  WhisperWorkerResponseSchema,
+} from './types.mjs'
+
+interface PendingRequest {
+  resolve: (output: WhisperOutput) => void
+  reject: (err: Error) => void
+}
+
+let workerProcess: ChildProcessWithoutNullStreams | undefined
+const pendingQueue: PendingRequest[] = []
+
+function resolveWorkerScriptPath(): string {
+  const relativeToModule = fileURLToPath(new URL('../src/whisper_worker.py', import.meta.url))
+  if (fs.existsSync(relativeToModule)) {
+    return relativeToModule
+  }
+  return path.resolve(process.cwd(), 'src/whisper_worker.py')
+}
+
+function getOrStartWorker(): ChildProcessWithoutNullStreams {
+  if (workerProcess && !workerProcess.killed && workerProcess.exitCode === null) {
+    return workerProcess
+  }
+
+  const pythonBin =
+    process.env.PYTHON_COMMAND || (process.platform === 'win32' ? 'python' : 'python3')
+  const model = process.env.WHISPER_MODEL
+    ? WhisperModelSchema.parse(process.env.WHISPER_MODEL)
+    : modelSize
+  const scriptPath = resolveWorkerScriptPath()
+
+  const child = spawn(pythonBin, ['-u', scriptPath], {
+    env: {
+      ...process.env,
+      WHISPER_MODEL: model,
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+
+  child.stderr.on('data', (chunk: Buffer) => {
+    const msg = chunk.toString().trim()
+    if (msg) {
+      console.log(msg)
+    }
+  })
+
+  const rl = readline.createInterface({ input: child.stdout })
+  rl.on('line', (line) => {
+    const trimmed = line.trim()
+    if (!trimmed) {
+      return
+    }
+
+    const pending = pendingQueue.shift()
+    if (!pending) {
+      return
+    }
+
+    try {
+      const parsed = WhisperWorkerResponseSchema.parse(JSON.parse(trimmed))
+      if (parsed.ok) {
+        pending.resolve(parsed)
+      } else {
+        pending.reject(new Error(`Whisper worker error: ${parsed.error}`))
+      }
+    } catch (err) {
+      pending.reject(err instanceof Error ? err : new Error(String(err)))
+    }
+  })
+
+  const handleTerminate = (reason: Error) => {
+    if (workerProcess === child) {
+      workerProcess = undefined
+    }
+    while (pendingQueue.length > 0) {
+      pendingQueue.shift()?.reject(reason)
+    }
+  }
+
+  child.on('error', (err) => {
+    handleTerminate(new Error(`Whisper worker process error: ${err.message}`))
+  })
+
+  child.on('exit', (code, signal) => {
+    handleTerminate(
+      new Error(`Whisper worker exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`)
+    )
+  })
+
+  workerProcess = child
+  return child
+}
+
+export function initWhisperWorker(): void {
+  getOrStartWorker()
+}
+
+export async function transcribePcm16kMono(pcmBuffer: Pcm16kMonoBuffer): Promise<WhisperOutput> {
+  const validBuffer = Pcm16kMonoBufferSchema.parse(pcmBuffer)
+  const worker = getOrStartWorker()
+
+  const header = Buffer.alloc(4)
+  header.writeUInt32BE(validBuffer.byteLength, 0)
+
+  return new Promise<WhisperOutput>((resolve, reject) => {
+    pendingQueue.push({ resolve, reject })
+
+    worker.stdin.write(header, (headerErr) => {
+      if (headerErr) {
+        return
+      }
+      worker.stdin.write(validBuffer)
+    })
+  })
+}
+
+export function closeWhisperWorker(): void {
+  if (workerProcess) {
+    try {
+      workerProcess.stdin.end()
+      workerProcess.kill()
+    } catch {
+      // ignore errors during shutdown
+    }
+    workerProcess = undefined
+  }
+}

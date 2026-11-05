@@ -1,27 +1,27 @@
 # discord-stt
-A Discord server that enables real-time transcription on a voice channel via a bot listening and sending messages. 
+
+A Discord server that enables real-time transcription on a voice channel via a single bot listening on connected audio streams, and sending incremental messages.
 
 ![Discord Speech-to-Text](https://github.com/jkeys-dev/discord-stt/blob/main/static/discord-stt.gif?raw=true)
 
 ## Setup
 
 ```
-# install ffmpeg
-brew install ffmpeg # or, https://ffmpeg.org/download.html
-
-# install whisper CLI
-# (goto openai/whisper and follow the instructions there)
-
+# Note: insert values for your bot and PostgreSQL connection (DATABASE_URL) into .env
 cp .env.local .env
 
-# insert values for your bot into the .env
+# active a virtual environment for this project
+python3 -m venv ~/.venv/discord-stt
+source ~/.venv/discord-stt/bin/activate
 
-# setup slash commands
-pip install python-dotenv
-python create_slash_commands.py # or, `python3 create_slash_commands.py`
+# install dependencies
+pip3 install python-dotenv requests
+
+# Setup slash commands for beginning and ending transcription
+python3 src/create_slash_commands.py
 ```
 
-Find the channel ids and paste them into your `.env` file. Also, create a Discord bot and paste the bot's token in.
+Paste your Discord bot token, application ID, and PostgreSQL `DATABASE_URL` into your `.env` file. The `transcriptions` table and indexes are automatically created on startup.
 
 ## Usage
 
@@ -45,7 +45,6 @@ docker run -it --rm --gpus all discord-stt
 This repository is mostly a proof of concept that shows that it is possible to transcribe audio buffers from Discord and post the transcriptions to a text channel, in near-time that is close enough to real-time to be useful. However, it is not a complete solution, and known problems are listed below.
 
 - fast machine required
-- buggy -- cleanup is not working properly
-- technically incorrect -- the silence packet interval and the real packet event listener are not synchronized in any way. 
-- lack of cleanup -- The bot will not presently attempt to clean up after itself by deleting old discord messages. 
+- technically incorrect -- the silence packet interval and the real packet event listener are not synchronized in any way.
+- lack of cleanup -- The bot will not presently attempt to clean up after itself by deleting old discord messages.
 - approximate outputs -- transcriptions might be posted out of order
