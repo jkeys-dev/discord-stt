@@ -2,6 +2,8 @@ import {
   DecibelsFsSchema,
   FrameCountSchema,
   MillisecondsSchema,
+  SttEngine,
+  SttEngineSchema,
   VadConfig,
   VadConfigSchema,
   WhisperModel,
@@ -19,6 +21,7 @@ export const chunkSize = chunkDuration * sampleRate * channels * bytesPerSample 
 export const maxChunkDuration = 20 // seconds max utterance length before forced flush
 export const maxChunkSize = maxChunkDuration * sampleRate * channels * bytesPerSample // 640,000 bytes
 
+export const defaultSttEngine: SttEngine = SttEngineSchema.parse('whisper')
 export const modelSize: WhisperModel = WhisperModelSchema.parse('base.en')
 
 // the minimum number of frames that are non-silent in order to transcribe

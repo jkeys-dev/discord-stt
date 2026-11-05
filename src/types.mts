@@ -89,6 +89,9 @@ export const VadStateSnapshotSchema = z
 export type VadStateSnapshot = z.infer<typeof VadStateSnapshotSchema>
 
 // Branded configuration & environment schemas
+export const SttEngineSchema = z.enum(['whisper', 'nano-parakeet']).brand<'SttEngine'>()
+export type SttEngine = z.infer<typeof SttEngineSchema>
+
 export const WhisperModelSchema = z
   .enum([
     'tiny',
@@ -104,6 +107,9 @@ export const WhisperModelSchema = z
   .brand<'WhisperModel'>()
 export type WhisperModel = z.infer<typeof WhisperModelSchema>
 
+export const ParakeetModelSchema = z.string().min(1).brand<'ParakeetModel'>()
+export type ParakeetModel = z.infer<typeof ParakeetModelSchema>
+
 export const DiscordTokenSchema = z.string().min(1).brand<'DiscordToken'>()
 export type DiscordToken = z.infer<typeof DiscordTokenSchema>
 
@@ -117,12 +123,14 @@ export const EnvSchema = z.object({
   DISCORD_TOKEN: DiscordTokenSchema,
   DISCORD_APPLICATION_ID: z.string().min(1).optional(),
   DATABASE_URL: DatabaseUrlSchema.optional(),
+  STT_ENGINE: SttEngineSchema.optional(),
   WHISPER_MODEL: WhisperModelSchema.optional(),
+  PARAKEET_MODEL: ParakeetModelSchema.optional(),
   PYTHON_COMMAND: z.string().min(1).optional(),
 })
 export type Env = z.infer<typeof EnvSchema>
 
-// Whisper worker JSON response schemas
+// Whisper / STT worker JSON response schemas
 export const WhisperSegmentSchema = z.object({
   no_speech_prob: z.number().min(0).max(1),
 })

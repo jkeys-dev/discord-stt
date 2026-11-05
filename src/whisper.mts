@@ -3,10 +3,12 @@ import fs from 'fs'
 import path from 'path'
 import readline from 'readline'
 import { fileURLToPath } from 'url'
-import { modelSize } from './constants.mjs'
+import { defaultSttEngine, modelSize } from './constants.mjs'
 import {
+  ParakeetModelSchema,
   Pcm16kMonoBuffer,
   Pcm16kMonoBufferSchema,
+  SttEngineSchema,
   WhisperModelSchema,
   WhisperOutput,
   WhisperWorkerResponseSchema,
@@ -35,15 +37,23 @@ function getOrStartWorker(): ChildProcessWithoutNullStreams {
 
   const pythonBin =
     process.env.PYTHON_COMMAND || (process.platform === 'win32' ? 'python' : 'python3')
-  const model = process.env.WHISPER_MODEL
+  const sttEngine = process.env.STT_ENGINE
+    ? SttEngineSchema.parse(process.env.STT_ENGINE)
+    : defaultSttEngine
+  const whisperModel = process.env.WHISPER_MODEL
     ? WhisperModelSchema.parse(process.env.WHISPER_MODEL)
     : modelSize
+  const parakeetModel = process.env.PARAKEET_MODEL
+    ? ParakeetModelSchema.parse(process.env.PARAKEET_MODEL)
+    : undefined
   const scriptPath = resolveWorkerScriptPath()
 
   const child = spawn(pythonBin, ['-u', scriptPath], {
     env: {
       ...process.env,
-      WHISPER_MODEL: model,
+      STT_ENGINE: sttEngine,
+      WHISPER_MODEL: whisperModel,
+      ...(parakeetModel ? { PARAKEET_MODEL: parakeetModel } : {}),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   })
@@ -72,7 +82,7 @@ function getOrStartWorker(): ChildProcessWithoutNullStreams {
       if (parsed.ok) {
         pending.resolve(parsed)
       } else {
-        pending.reject(new Error(`Whisper worker error: ${parsed.error}`))
+        pending.reject(new Error(`STT worker error: ${parsed.error}`))
       }
     } catch (err) {
       pending.reject(err instanceof Error ? err : new Error(String(err)))
@@ -89,12 +99,12 @@ function getOrStartWorker(): ChildProcessWithoutNullStreams {
   }
 
   child.on('error', (err) => {
-    handleTerminate(new Error(`Whisper worker process error: ${err.message}`))
+    handleTerminate(new Error(`STT worker process error: ${err.message}`))
   })
 
   child.on('exit', (code, signal) => {
     handleTerminate(
-      new Error(`Whisper worker exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`)
+      new Error(`STT worker exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`)
     )
   })
 
