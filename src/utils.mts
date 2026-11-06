@@ -1,11 +1,10 @@
-import { APIInteractionGuildMember } from '@discordjs/core'
 import {
   VoiceConnection,
   VoiceConnectionStatus,
   entersState,
   joinVoiceChannel,
 } from '@discordjs/voice'
-import { GuildMember, TextChannel, VoiceChannel } from 'discord.js'
+import { APIInteractionGuildMember, GuildMember, TextChannel, VoiceChannel } from 'discord.js'
 import { saveTranscription } from './db.mjs'
 import {
   NewTranscriptionRecordSchema,
@@ -45,10 +44,16 @@ export async function connectToVoiceChannel(channel: VoiceChannel): Promise<Voic
     guildId: channel.guild.id,
     adapterCreator: channel.guild.voiceAdapterCreator,
     selfDeaf: false,
+    decryptionFailureTolerance: Number.MAX_SAFE_INTEGER,
   })
 
   try {
     await entersState(connection, VoiceConnectionStatus.Ready, 20e3)
+    const networking = Reflect.get(connection.state, 'networking')
+    const dave = networking ? Reflect.get(networking.state, 'dave') : undefined
+    if (dave?.session?.setPassthroughMode) {
+      dave.session.setPassthroughMode(true, 10)
+    }
     return connection
   } catch (err) {
     error('failed to connect to voice channel')

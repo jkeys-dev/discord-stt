@@ -1,7 +1,7 @@
-import Opus from '@discordjs/opus'
 import { AudioReceiveStream, VoiceReceiver } from '@discordjs/voice'
 import assert from 'assert'
 import { TextChannel, VoiceChannel } from 'discord.js'
+import OpusScript from 'opusscript'
 import { client } from './app.mjs'
 import { channels, frameDuration, maxChunkSize, sampleRate } from './constants.mjs'
 import { generateSilentPcmFrame } from './encoder.mjs'
@@ -24,8 +24,6 @@ import {
 import { error, log, transcodeAndSave } from './utils.mjs'
 import { createVadProcessor } from './vad.mjs'
 
-const { OpusEncoder } = Opus
-
 export function getUserConnectedHandler(
   receiver: VoiceReceiver,
   targetTextChannel: TextChannel,
@@ -35,8 +33,8 @@ export function getUserConnectedHandler(
   const voiceChannelId = VoiceChannelIdSchema.parse(voiceChannel.id)
   const guildId = GuildIdSchema.parse(voiceChannel.guild.id)
 
-  // Decode Opus directly to 16kHz mono 16-bit signed little-endian PCM
-  const encoder = new OpusEncoder(sampleRate, channels)
+  // Decode Opus directly to 16kHz mono 16-bit signed little-endian PCM via WASM OpusScript
+  const encoder = new OpusScript(sampleRate, channels, OpusScript.Application.VOIP)
   const silentPcmFrame = generateSilentPcmFrame()
 
   return async function handleUserConnected(rawUserId: string) {
@@ -165,6 +163,7 @@ export function getUserConnectedHandler(
       clearInterval(checkMissingPacketsInterval)
       stream.off('data', handlePacket)
       stream.off('end', stop)
+      stream.off('close', stop)
       stream.destroy()
     }
 
@@ -172,6 +171,7 @@ export function getUserConnectedHandler(
 
     stream.on('data', handlePacket)
     stream.on('end', stop)
+    stream.on('close', stop)
     stream.on('error', (err) => {
       error(`audio stream error for ${username}`, err)
     })

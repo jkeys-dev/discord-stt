@@ -1,6 +1,5 @@
-import { GatewayIntentBits } from '@discordjs/core'
 import assert from 'assert'
-import { Client, TextChannel, VoiceChannel } from 'discord.js'
+import { Client, GatewayIntentBits, TextChannel, VoiceChannel } from 'discord.js'
 import { config } from 'dotenv'
 import { closeDb, initDb } from './db.mjs'
 import { getUserConnectedHandler } from './handler.mjs'
@@ -85,7 +84,14 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.reply('Discord STT | Starting transcription in your voice channel!')
 
     const targetTextChannel = interaction.channel as TextChannel
-    const connection = await connectToVoiceChannel(voiceChannel)
+    let connection
+    try {
+      connection = await connectToVoiceChannel(voiceChannel)
+    } catch (err) {
+      error('could not join voice channel', err)
+      await interaction.followUp('Discord STT | Failed to connect to the voice channel.').catch(() => {})
+      return
+    }
 
     // Start transcription
     const handleUserConnected = getUserConnectedHandler(

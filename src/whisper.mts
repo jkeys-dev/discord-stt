@@ -30,13 +30,29 @@ function resolveWorkerScriptPath(): string {
   return path.resolve(process.cwd(), 'src/whisper_worker.py')
 }
 
+function resolvePythonCommand(): string {
+  if (process.env.PYTHON_COMMAND) {
+    return process.env.PYTHON_COMMAND
+  }
+
+  const venvCandidate =
+    process.platform === 'win32'
+      ? path.resolve(process.cwd(), '.venv', 'Scripts', 'python.exe')
+      : path.resolve(process.cwd(), '.venv', 'bin', 'python')
+
+  if (fs.existsSync(venvCandidate)) {
+    return venvCandidate
+  }
+
+  return process.platform === 'win32' ? 'python' : 'python3'
+}
+
 function getOrStartWorker(): ChildProcessWithoutNullStreams {
   if (workerProcess && !workerProcess.killed && workerProcess.exitCode === null) {
     return workerProcess
   }
 
-  const pythonBin =
-    process.env.PYTHON_COMMAND || (process.platform === 'win32' ? 'python' : 'python3')
+  const pythonBin = resolvePythonCommand()
   const sttEngine = process.env.STT_ENGINE
     ? SttEngineSchema.parse(process.env.STT_ENGINE)
     : defaultSttEngine
