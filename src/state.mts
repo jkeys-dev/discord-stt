@@ -1,35 +1,116 @@
 import { VoiceConnection } from '@discordjs/voice'
-import assert from 'assert'
 import { TextChannel, VoiceChannel } from 'discord.js'
-import { TranscriptionMetadata } from './types.mjs'
+import {
+  TextChannelIdSchema,
+  TranscriptionMetadata,
+  UserId,
+  UserIdSchema,
+  VoiceChannelId,
+  VoiceChannelIdSchema,
+} from './types.mjs'
 import { disconnectFromVoiceChannel } from './utils.mjs'
 
-const transcriptionMetadatasByVoiceChannelId: Record<string, TranscriptionMetadata | undefined> = {}
+const transcriptionsByVoiceChannelId = new Map<VoiceChannelId, TranscriptionMetadata>()
 
-export function insertTranscription(voiceChannel: VoiceChannel, textChannel: TextChannel, connection: VoiceConnection) {
-  transcriptionMetadatasByVoiceChannelId[voiceChannel.id] = {
-    id: voiceChannel.id,
-    users: {},
-    voiceChannelId: voiceChannel.id,
-    textChannelId: textChannel.id,
-    connection
-  }
+export function hasTranscription(voiceChannelId: VoiceChannelId): boolean {
+  return transcriptionsByVoiceChannelId.has(VoiceChannelIdSchema.parse(voiceChannelId))
 }
 
-export function removeTranscription(voiceChannel: VoiceChannel) {
-  const state = transcriptionMetadatasByVoiceChannelId[voiceChannel.id]
-  for (const user of Object.values(state.users)) {
-    user.stop()
+export function insertTranscription(
+  voiceChannel: Pick<VoiceChannel, 'id'>,
+  textChannel: Pick<TextChannel, 'id'>,
+  connection: VoiceConnection,
+  onSpeakingStart?: (userId: string) => void
+) {
+  const voiceChannelId = VoiceChannelIdSchema.parse(voiceChannel.id)
+  const textChannelId = TextChannelIdSchema.parse(textChannel.id)
+
+  if (transcriptionsByVoiceChannelId.has(voiceChannelId)) {
+    removeTranscription(voiceChannelId)
   }
-  disconnectFromVoiceChannel(state.connection)
-  transcriptionMetadatasByVoiceChannelId[voiceChannel.id] = undefined
+
+  transcriptionsByVoiceChannelId.set(voiceChannelId, {
+    voiceChannelId,
+    textChannelId,
+    users: new Map<UserId, () => void>(),
+    connection,
+    onSpeakingStart,
+  })
 }
 
-export function insertUserToTranscription(voiceChannel: VoiceChannel, userId: string, stop: () => void) {
-  assert(
-    !!transcriptionMetadatasByVoiceChannelId[voiceChannel.id],
-    'this transcription does not exist in the local state'
+export function removeTranscription(
+  voiceChannelOrId: VoiceChannelId | Pick<VoiceChannel, 'id'>
+): boolean {
+  const voiceChannelId = VoiceChannelIdSchema.parse(
+    typeof voiceChannelOrId === 'string' ? voiceChannelOrId : voiceChannelOrId.id
   )
+  const state = transcriptionsByVoiceChannelId.get(voiceChannelId)
+  if (!state) {
+    return false
+  }
 
-  transcriptionMetadatasByVoiceChannelId[voiceChannel.id].users[userId] = { id: userId, stop }
+  if (state.onSpeakingStart) {
+    state.connection.receiver.speaking.off('start', state.onSpeakingStart)
+  }
+
+  for (const stopUser of state.users.values()) {
+    stopUser()
+  }
+
+  disconnectFromVoiceChannel(state.connection)
+  transcriptionsByVoiceChannelId.delete(voiceChannelId)
+  return true
+}
+
+export function hasUserInTranscription(
+  voiceChannelId: VoiceChannelId,
+  userId: UserId
+): boolean {
+  const validVoiceId = VoiceChannelIdSchema.parse(voiceChannelId)
+  const validUserId = UserIdSchema.parse(userId)
+  return Boolean(transcriptionsByVoiceChannelId.get(validVoiceId)?.users.has(validUserId))
+}
+
+export function insertUserToTranscription(
+  voiceChannelOrId: VoiceChannelId | Pick<VoiceChannel, 'id'>,
+  userId: UserId,
+  stop: () => void
+) {
+  const voiceChannelId = VoiceChannelIdSchema.parse(
+    typeof voiceChannelOrId === 'string' ? voiceChannelOrId : voiceChannelOrId.id
+  )
+  const validUserId = UserIdSchema.parse(userId)
+  const state = transcriptionsByVoiceChannelId.get(voiceChannelId)
+  if (!state) {
+    return
+  }
+
+  state.users.set(validUserId, stop)
+}
+
+export function removeUserFromTranscription(
+  voiceChannelId: VoiceChannelId,
+  userId: UserId
+) {
+  const validVoiceId = VoiceChannelIdSchema.parse(voiceChannelId)
+  const validUserId = UserIdSchema.parse(userId)
+  transcriptionsByVoiceChannelId.get(validVoiceId)?.users.delete(validUserId)
+}
+
+export function stopUserInTranscription(
+  voiceChannelId: VoiceChannelId,
+  userId: UserId
+) {
+  const validVoiceId = VoiceChannelIdSchema.parse(voiceChannelId)
+  const validUserId = UserIdSchema.parse(userId)
+  const stop = transcriptionsByVoiceChannelId.get(validVoiceId)?.users.get(validUserId)
+  if (stop) {
+    stop()
+  }
+}
+
+export function stopAllTranscriptions() {
+  for (const voiceChannelId of Array.from(transcriptionsByVoiceChannelId.keys())) {
+    removeTranscription(voiceChannelId)
+  }
 }

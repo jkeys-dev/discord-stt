@@ -1,16 +1,16 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ES2015",
-    // "noImplicitAny": true,
+    "module": "ES2022",
+    "strictNullChecks": true,
     "removeComments": true,
     "preserveConstEnums": true,
     "sourceMap": true,
-    "moduleResolution":"node",
+    "moduleResolution": "node",
     "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
     "outDir": "build"
   },
-  "moduleResolution":"NodeNext",
   "include": ["src"],
   "exclude": ["node_modules", "build"]
 }

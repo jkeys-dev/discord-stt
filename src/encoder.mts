@@ -1,11 +1,13 @@
-import { OpusEncoder } from '@discordjs/opus'
+import OpusScript from 'opusscript'
+import { frameByteLength, samplesPerFrame } from './constants.mjs'
+import { OpusPacket, OpusPacketSchema, Pcm16kMonoBuffer, Pcm16kMonoBufferSchema } from './types.mjs'
 
-export function generateSilentOpusPacket(encoder: OpusEncoder) {
-  // 960 samples of silence in a 48kHz, 1-channel PCM buffer
-  const silentPcmChunk = Buffer.alloc(960 * 1 * 2, 0)
+export function generateSilentPcmFrame(): Pcm16kMonoBuffer {
+  // 320 samples of silence in a 16kHz, 1-channel 16-bit PCM buffer (640 bytes)
+  return Pcm16kMonoBufferSchema.parse(Buffer.alloc(frameByteLength, 0))
+}
 
-  // Encode the silent PCM buffer as an Opus packet
-  const silentOpusPacket = encoder.encode(silentPcmChunk)
-
-  return silentOpusPacket
+export function generateSilentOpusPacket(encoder: OpusScript): OpusPacket {
+  const silentPcmChunk = generateSilentPcmFrame()
+  return OpusPacketSchema.parse(encoder.encode(silentPcmChunk, samplesPerFrame))
 }

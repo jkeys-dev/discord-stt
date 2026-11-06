@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-bot_token = os.getenv('DISCORD_BOT_TOKEN')
+bot_token = os.getenv('DISCORD_TOKEN') or os.getenv('DISCORD_BOT_TOKEN')
 application_id = os.getenv('DISCORD_APPLICATION_ID')
 
 url = f"https://discord.com/api/v10/applications/{application_id}/commands"

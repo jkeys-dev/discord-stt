@@ -15,7 +15,7 @@ RUN apt-get install -y python3.10 && rm -rf /var/lib/apt/lists/*
 RUN npm install -g yarn 
 
 RUN curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py
-RUN pip3 install -U openai-whisper && pip3 uninstall -y torch && pip3 cache purge && pip3 install torch torchvision torchaudio --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cu117
+RUN pip3 install -U openai-whisper nano-parakeet && pip3 uninstall -y torch && pip3 cache purge && pip3 install torch torchvision torchaudio --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cu117
 
 # copy src
 COPY . .

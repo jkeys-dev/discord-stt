@@ -1,21 +1,28 @@
-import Opus from '@discordjs/opus'
 import { AudioReceiveStream, VoiceReceiver } from '@discordjs/voice'
 import assert from 'assert'
 import { TextChannel, VoiceChannel } from 'discord.js'
-import fs from 'fs'
+import OpusScript from 'opusscript'
 import { client } from './app.mjs'
-import { channels, chunkSize, frameDuration, minNoisyFrames, sampleRate } from './constants.mjs'
-import { generateSilentOpusPacket } from './encoder.mjs'
-import { insertUserToTranscription } from './state.mjs'
-import { log, transcodeAndSave } from './utils.mjs'
-
-const { OpusEncoder } = Opus
-
-const startedBySpeaker = {}
-
-function getSpeakerHashKey(voiceChannelId: string, username: string) {
-  return `${voiceChannelId}:${username}`
-}
+import { channels, frameDuration, maxChunkSize, sampleRate } from './constants.mjs'
+import { generateSilentPcmFrame } from './encoder.mjs'
+import {
+  hasUserInTranscription,
+  insertUserToTranscription,
+  removeUserFromTranscription,
+} from './state.mjs'
+import {
+  GuildIdSchema,
+  OpusPacketSchema,
+  Pcm16kMonoBuffer,
+  Pcm16kMonoBufferSchema,
+  SpeakerContextSchema,
+  UserIdSchema,
+  UsernameSchema,
+  VadStateSnapshot,
+  VoiceChannelIdSchema,
+} from './types.mjs'
+import { error, log, transcodeAndSave } from './utils.mjs'
+import { createVadProcessor } from './vad.mjs'
 
 export function getUserConnectedHandler(
   receiver: VoiceReceiver,
@@ -23,85 +30,150 @@ export function getUserConnectedHandler(
   voiceChannel: VoiceChannel
 ) {
   assert(!!client.user, 'did not find user for bot')
-  const encoder = new OpusEncoder(sampleRate, channels)
-  const silentOpusPacket = generateSilentOpusPacket(encoder)
+  const voiceChannelId = VoiceChannelIdSchema.parse(voiceChannel.id)
+  const guildId = GuildIdSchema.parse(voiceChannel.guild.id)
 
-  return async function handleUserConnected(userId: string) {
-    const user = client.users.cache.get(userId)
-    assert(user, 'did not find broadcasting user')
-    const speakerHashKey = getSpeakerHashKey(voiceChannel.id, user.username)
-    if (startedBySpeaker[speakerHashKey]) {
+  // Decode Opus directly to 16kHz mono 16-bit signed little-endian PCM via WASM OpusScript
+  const encoder = new OpusScript(sampleRate, channels, OpusScript.Application.VOIP)
+  const silentPcmFrame = generateSilentPcmFrame()
+
+  return async function handleUserConnected(rawUserId: string) {
+    const userId = UserIdSchema.parse(rawUserId)
+    if (hasUserInTranscription(voiceChannelId, userId)) {
       return
     }
-    startedBySpeaker[speakerHashKey] = true
-    log(`listening to input from user ${user.username}`)
+
+    const user =
+      client.users.cache.get(userId) ?? (await client.users.fetch(userId).catch(() => undefined))
+    if (!user || user.bot) {
+      return
+    }
+
+    if (hasUserInTranscription(voiceChannelId, userId)) {
+      return
+    }
+
+    const username = UsernameSchema.parse(user.username)
+    const speaker = SpeakerContextSchema.parse({
+      guildId,
+      voiceChannelId,
+      userId,
+      username,
+    })
+
+    log(`listening to input from user ${username}`)
 
     // closure variables that represent the state for a given user
-    let checkMissingPacketsInterval: NodeJS.Timer
-    let packets: Buffer[] = []
+    const vad = createVadProcessor()
+    let preRoll: Pcm16kMonoBuffer[] = []
+    let packets: Pcm16kMonoBuffer[] = []
     let bufferLength = 0
-    let numNoisyFrames = 0 // the # of non-silent frames in a buffering period
     let lastPacketTimestamp = Date.now()
     let transcoding = false
-    let talking = false
-    let idx = 0
-    let username: string | undefined
-    let stream: AudioReceiveStream | undefined
+    let stopped = false
+    const stream: AudioReceiveStream = receiver.subscribe(userId)
 
-    async function handlePacket(opusPacket) {
-      talking = true
-      numNoisyFrames++
-      lastPacketTimestamp = Date.now()
-      const decoded = encoder.decode(opusPacket)
-      bufferLength += decoded.length
-      packets.push(decoded)
-    }
-
-    stream = receiver.subscribe(userId)
-
-    async function infer() {
-      transcoding = true
-      assert(user, 'did not find broadcasting user')
-      log('transcoding and saving')
-      const audioBuffer = Buffer.concat(packets)
+    function clearUtteranceBuffer() {
       packets = []
       bufferLength = 0
-      numNoisyFrames = 0
-      const audioPath = `${user.username}_${idx++}_chunk.wav`
-      await transcodeAndSave(audioBuffer, audioPath, user.username, targetTextChannel)
-      transcoding = false
-      fs.rmSync(`.app-cache/${audioPath}`)
+      preRoll = []
+      vad.resetUtterance()
     }
 
-    checkMissingPacketsInterval = setInterval(async () => {
-      // Check if no packet has been received for more than 20ms (assuming 48kHz sample rate and 960 samples per frame)
-      if (Date.now() - lastPacketTimestamp > frameDuration) {
-        // Insert a silent Opus packet
-        const decoded = encoder.decode(silentOpusPacket)
-        bufferLength += decoded.length
-        packets.push(decoded)
+    async function infer() {
+      if (transcoding || packets.length === 0) {
+        return
       }
+      transcoding = true
+      const audioBuffer = Pcm16kMonoBufferSchema.parse(Buffer.concat(packets))
+      clearUtteranceBuffer()
 
-      if (Date.now() - lastPacketTimestamp > 800) {
-        talking = false
+      try {
+        log(`transcribing 16kHz mono PCM for ${username} (${audioBuffer.byteLength} bytes)`)
+        await transcodeAndSave(audioBuffer, speaker, targetTextChannel)
+      } catch (err) {
+        error(`transcription failed for ${username}`, err)
+      } finally {
+        transcoding = false
       }
+    }
 
-      if (bufferLength >= chunkSize && !transcoding && !talking && numNoisyFrames >= minNoisyFrames) {
-        await infer()
+    function evaluateVadDecision(vadState: VadStateSnapshot) {
+      if ((vadState.shouldTranscribe || bufferLength >= maxChunkSize) && !transcoding) {
+        void infer()
+      } else if (vadState.shouldReset) {
+        clearUtteranceBuffer()
       }
-    }, frameDuration) // Check every 20ms
+    }
+
+    function handlePacket(rawOpusPacket: Buffer) {
+      try {
+        const opusPacket = OpusPacketSchema.parse(rawOpusPacket)
+        const decoded = Pcm16kMonoBufferSchema.parse(encoder.decode(opusPacket))
+        lastPacketTimestamp = Date.now()
+
+        const vadState = vad.processFrame(decoded)
+
+        if (vadState.voicedFrames > 0) {
+          if (preRoll.length > 0) {
+            for (const preFrame of preRoll) {
+              packets.push(preFrame)
+              bufferLength += preFrame.length
+            }
+            preRoll = []
+          }
+
+          packets.push(decoded)
+          bufferLength += decoded.length
+          evaluateVadDecision(vadState)
+        } else {
+          preRoll.push(decoded)
+          if (preRoll.length > vad.config.preRollFrames) {
+            preRoll.shift()
+          }
+        }
+      } catch (err) {
+        error(`failed to decode opus packet from ${username}`, err)
+      }
+    }
+
+    const checkMissingPacketsInterval = setInterval(() => {
+      const elapsed = Date.now() - lastPacketTimestamp
+
+      // When Discord's client gate stops transmitting packets during silence,
+      // feed a packet-silence tick into the VAD processor every 20ms.
+      if (elapsed > frameDuration) {
+        const vadState = vad.processFrame(null)
+
+        if (vadState.voicedFrames > 0) {
+          packets.push(silentPcmFrame)
+          bufferLength += silentPcmFrame.length
+          evaluateVadDecision(vadState)
+        }
+      }
+    }, frameDuration)
 
     function stop() {
-      log(`$stopped listening to ${username} in ${targetTextChannel.name}`)
-      startedBySpeaker[speakerHashKey] = undefined
+      if (stopped) {
+        return
+      }
+      stopped = true
+      log(`stopped listening to ${username} in ${targetTextChannel.name}`)
+      removeUserFromTranscription(voiceChannelId, userId)
+      clearInterval(checkMissingPacketsInterval)
       stream.off('data', handlePacket)
       stream.off('end', stop)
-      clearInterval(checkMissingPacketsInterval)
+      stream.off('close', stop)
+      stream.destroy()
     }
 
-    insertUserToTranscription(voiceChannel, user.id, stop)
+    insertUserToTranscription(voiceChannelId, userId, stop)
 
     stream.on('data', handlePacket)
     stream.on('end', stop)
+    stream.on('close', stop)
+    stream.on('error', (err) => {
+      error(`audio stream error for ${username}`, err)
+    })
   }
 }
