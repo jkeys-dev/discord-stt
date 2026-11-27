@@ -5,11 +5,8 @@ import readline from 'readline'
 import { fileURLToPath } from 'url'
 import { defaultSttEngine, modelSize } from './constants.mjs'
 import {
-  ParakeetModelSchema,
+  EnvSchema,
   Pcm16kMonoBuffer,
-  Pcm16kMonoBufferSchema,
-  SttEngineSchema,
-  WhisperModelSchema,
   WhisperOutput,
   WhisperWorkerResponseSchema,
 } from './types.mjs'
@@ -30,9 +27,9 @@ function resolveWorkerScriptPath(): string {
   return path.resolve(process.cwd(), 'src/whisper_worker.py')
 }
 
-function resolvePythonCommand(): string {
-  if (process.env.PYTHON_COMMAND) {
-    return process.env.PYTHON_COMMAND
+function resolvePythonCommand(pythonCommandEnv?: string): string {
+  if (pythonCommandEnv) {
+    return pythonCommandEnv
   }
 
   const venvCandidate =
@@ -52,16 +49,11 @@ function getOrStartWorker(): ChildProcessWithoutNullStreams {
     return workerProcess
   }
 
-  const pythonBin = resolvePythonCommand()
-  const sttEngine = process.env.STT_ENGINE
-    ? SttEngineSchema.parse(process.env.STT_ENGINE)
-    : defaultSttEngine
-  const whisperModel = process.env.WHISPER_MODEL
-    ? WhisperModelSchema.parse(process.env.WHISPER_MODEL)
-    : modelSize
-  const parakeetModel = process.env.PARAKEET_MODEL
-    ? ParakeetModelSchema.parse(process.env.PARAKEET_MODEL)
-    : undefined
+  const env = EnvSchema.parse(process.env)
+  const pythonBin = resolvePythonCommand(env.PYTHON_COMMAND)
+  const sttEngine = env.STT_ENGINE ?? defaultSttEngine
+  const whisperModel = env.WHISPER_MODEL ?? modelSize
+  const parakeetModel = env.PARAKEET_MODEL
   const scriptPath = resolveWorkerScriptPath()
 
   const child = spawn(pythonBin, ['-u', scriptPath], {
@@ -133,11 +125,10 @@ export function initWhisperWorker(): void {
 }
 
 export async function transcribePcm16kMono(pcmBuffer: Pcm16kMonoBuffer): Promise<WhisperOutput> {
-  const validBuffer = Pcm16kMonoBufferSchema.parse(pcmBuffer)
   const worker = getOrStartWorker()
 
   const header = Buffer.alloc(4)
-  header.writeUInt32BE(validBuffer.byteLength, 0)
+  header.writeUInt32BE(pcmBuffer.byteLength, 0)
 
   return new Promise<WhisperOutput>((resolve, reject) => {
     pendingQueue.push({ resolve, reject })
@@ -146,7 +137,7 @@ export async function transcribePcm16kMono(pcmBuffer: Pcm16kMonoBuffer): Promise
       if (headerErr) {
         return
       }
-      worker.stdin.write(validBuffer)
+      worker.stdin.write(pcmBuffer)
     })
   })
 }

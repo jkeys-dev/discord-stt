@@ -7,16 +7,10 @@ import {
 import { APIInteractionGuildMember, GuildMember, TextChannel, VoiceChannel } from 'discord.js'
 import { saveTranscription } from './db.mjs'
 import {
-  NewTranscriptionRecordSchema,
   Pcm16kMonoBuffer,
-  Pcm16kMonoBufferSchema,
   SpeakerContext,
-  SpeakerContextSchema,
-  TextChannelIdSchema,
-  TranscriptText,
-  TranscriptTextSchema,
+  TextChannelId,
   WhisperOutput,
-  WhisperOutputSchema,
 } from './types.mjs'
 import { transcribePcm16kMono } from './whisper.mjs'
 
@@ -80,12 +74,10 @@ export function isGuildMember(
 
 // transcription / whisper utils
 
-export function extractTranscriptText(output: WhisperOutput): TranscriptText | undefined {
-  const validOutput = WhisperOutputSchema.parse(output)
-
+export function extractTranscriptText(output: WhisperOutput): string | undefined {
   const avgNoSpeechProb =
-    validOutput.segments.length > 0
-      ? sum(validOutput.segments.map((seg) => seg.no_speech_prob)) / validOutput.segments.length
+    output.segments.length > 0
+      ? sum(output.segments.map((seg) => seg.no_speech_prob)) / output.segments.length
       : 1.0
 
   if (avgNoSpeechProb > 0.6) {
@@ -93,38 +85,34 @@ export function extractTranscriptText(output: WhisperOutput): TranscriptText | u
     return undefined
   }
 
-  const textResult = TranscriptTextSchema.safeParse(validOutput.text)
-  return textResult.success ? textResult.data : undefined
+  const trimmed = output.text.trim()
+  return trimmed.length > 0 ? trimmed : undefined
 }
 
 export async function transcodeAndSave(
   buf: Pcm16kMonoBuffer,
   speaker: SpeakerContext,
-  targetTextChannel: TextChannel
+  targetTextChannel: TextChannel,
+  textChannelId: TextChannelId
 ) {
-  const validBuffer = Pcm16kMonoBufferSchema.parse(buf)
-  const validSpeaker = SpeakerContextSchema.parse(speaker)
-  const textChannelId = TextChannelIdSchema.parse(targetTextChannel.id)
-
-  const whisperOutput = await transcribePcm16kMono(validBuffer)
+  const whisperOutput = await transcribePcm16kMono(buf)
   const text = extractTranscriptText(whisperOutput)
 
   if (text) {
     await targetTextChannel.send({
-      content: `${validSpeaker.username}: ${text}`,
+      content: `${speaker.username}: ${text}`,
       tts: false,
     })
 
     try {
-      const record = NewTranscriptionRecordSchema.parse({
-        guildId: validSpeaker.guildId,
-        voiceChannelId: validSpeaker.voiceChannelId,
+      await saveTranscription({
+        guildId: speaker.guildId,
+        voiceChannelId: speaker.voiceChannelId,
         textChannelId,
-        userId: validSpeaker.userId,
-        username: validSpeaker.username,
+        userId: speaker.userId,
+        username: speaker.username,
         content: text,
       })
-      await saveTranscription(record)
     } catch (dbErr) {
       error('failed to save transcription to PostgreSQL', dbErr)
     }

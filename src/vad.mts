@@ -1,18 +1,5 @@
 import { defaultVadConfig } from './constants.mjs'
-import {
-  DecibelsFsSchema,
-  FrameCountSchema,
-  MillisecondsSchema,
-  Pcm16kMonoBuffer,
-  Pcm16kMonoBufferSchema,
-  RmsAmplitudeSchema,
-  VadConfig,
-  VadConfigSchema,
-  VadFrameMetrics,
-  VadFrameMetricsSchema,
-  VadStateSnapshot,
-  VadStateSnapshotSchema,
-} from './types.mjs'
+import { Pcm16kMonoBuffer, VadConfig, VadFrameMetrics, VadStateSnapshot } from './types.mjs'
 
 const MIN_DBFS = -100
 
@@ -25,29 +12,22 @@ function clampDb(value: number, min = -120, max = 0): number {
  * for a 16kHz mono 16-bit signed little-endian PCM frame.
  */
 export function computeFrameMetrics(frame: Pcm16kMonoBuffer): VadFrameMetrics {
-  const validFrame = Pcm16kMonoBufferSchema.parse(frame)
-  const sampleCount = validFrame.byteLength / 2
+  const sampleCount = Math.floor(frame.byteLength / 2)
 
   if (sampleCount === 0) {
-    return VadFrameMetricsSchema.parse({
-      rms: RmsAmplitudeSchema.parse(0),
-      dbfs: DecibelsFsSchema.parse(MIN_DBFS),
-    })
+    return { rms: 0, dbfs: MIN_DBFS }
   }
 
   let sumSquares = 0
-  for (let offset = 0; offset < validFrame.byteLength; offset += 2) {
-    const sample = validFrame.readInt16LE(offset) / 32768
+  for (let offset = 0; offset + 1 < frame.byteLength; offset += 2) {
+    const sample = frame.readInt16LE(offset) / 32768
     sumSquares += sample * sample
   }
 
   const rms = Math.min(1, Math.sqrt(sumSquares / sampleCount))
   const dbfs = rms > 1e-5 ? clampDb(20 * Math.log10(rms), MIN_DBFS, 0) : MIN_DBFS
 
-  return VadFrameMetricsSchema.parse({
-    rms: RmsAmplitudeSchema.parse(rms),
-    dbfs: DecibelsFsSchema.parse(dbfs),
-  })
+  return { rms, dbfs }
 }
 
 /**
@@ -56,9 +36,7 @@ export function computeFrameMetrics(frame: Pcm16kMonoBuffer): VadFrameMetrics {
  * onset/sustain hysteresis with a configurable silence hangover timer.
  */
 export function createVadProcessor(config: VadConfig = defaultVadConfig) {
-  const cfg = VadConfigSchema.parse(config)
-
-  let noiseFloorDb: number = -55
+  let noiseFloorDb = -55
   let isTalking = false
   let silentDurationMs = 0
   let voicedFrames = 0
@@ -70,17 +48,15 @@ export function createVadProcessor(config: VadConfig = defaultVadConfig) {
   }
 
   function processFrame(frame: Pcm16kMonoBuffer | null): VadStateSnapshot {
-    const metrics = frame
-      ? computeFrameMetrics(frame)
-      : { rms: RmsAmplitudeSchema.parse(0), dbfs: DecibelsFsSchema.parse(MIN_DBFS) }
+    const metrics = frame ? computeFrameMetrics(frame) : { rms: 0, dbfs: MIN_DBFS }
 
     const onsetThresholdDb = Math.max(
-      cfg.speechOnsetDb,
-      noiseFloorDb + cfg.snrOnsetMarginDb
+      config.speechOnsetDb,
+      noiseFloorDb + config.snrOnsetMarginDb
     )
     const sustainThresholdDb = Math.max(
-      cfg.speechSustainDb,
-      noiseFloorDb + cfg.snrSustainMarginDb
+      config.speechSustainDb,
+      noiseFloorDb + config.snrSustainMarginDb
     )
 
     const activeThresholdDb = isTalking ? sustainThresholdDb : onsetThresholdDb
@@ -94,38 +70,38 @@ export function createVadProcessor(config: VadConfig = defaultVadConfig) {
       // Update adaptive noise floor during non-speech acoustic frames
       if (frame && metrics.dbfs > MIN_DBFS) {
         const updatedFloor =
-          (1 - cfg.noiseFloorAlpha) * noiseFloorDb + cfg.noiseFloorAlpha * metrics.dbfs
-        noiseFloorDb = clampDb(updatedFloor, cfg.minNoiseFloorDb, cfg.maxNoiseFloorDb)
+          (1 - config.noiseFloorAlpha) * noiseFloorDb + config.noiseFloorAlpha * metrics.dbfs
+        noiseFloorDb = clampDb(updatedFloor, config.minNoiseFloorDb, config.maxNoiseFloorDb)
       }
 
       if (voicedFrames > 0) {
-        silentDurationMs += cfg.frameDurationMs
+        silentDurationMs += config.frameDurationMs
       }
     }
 
-    const silenceReached = voicedFrames > 0 && silentDurationMs >= cfg.silenceDurationMs
+    const silenceReached = voicedFrames > 0 && silentDurationMs >= config.silenceDurationMs
     if (silenceReached) {
       isTalking = false
     }
 
-    const shouldTranscribe = silenceReached && voicedFrames >= cfg.minVoicedFrames
-    const shouldReset = silenceReached && voicedFrames < cfg.minVoicedFrames
+    const shouldTranscribe = silenceReached && voicedFrames >= config.minVoicedFrames
+    const shouldReset = silenceReached && voicedFrames < config.minVoicedFrames
 
-    return VadStateSnapshotSchema.parse({
+    return {
       isSpeechFrame,
       isTalking,
       dbfs: metrics.dbfs,
-      noiseFloorDb: DecibelsFsSchema.parse(noiseFloorDb),
-      silentDurationMs: MillisecondsSchema.parse(silentDurationMs),
-      voicedFrames: FrameCountSchema.parse(voicedFrames),
+      noiseFloorDb,
+      silentDurationMs,
+      voicedFrames,
       shouldTranscribe,
       shouldReset,
-    })
+    }
   }
 
   return {
     processFrame,
     resetUtterance,
-    config: cfg,
+    config,
   }
 }

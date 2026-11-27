@@ -10,13 +10,18 @@ import {
   stopAllTranscriptions,
   stopUserInTranscription,
 } from './state.mjs'
-import { DiscordTokenSchema, UserIdSchema, VoiceChannelIdSchema } from './types.mjs'
+import {
+  EnvSchema,
+  TextChannelIdSchema,
+  UserIdSchema,
+  VoiceChannelIdSchema,
+} from './types.mjs'
 import { connectToVoiceChannel, error, isGuildMember, log } from './utils.mjs'
 import { closeWhisperWorker, initWhisperWorker } from './whisper.mjs'
 
 config()
 
-const tokenResult = DiscordTokenSchema.safeParse(process.env.DISCORD_TOKEN)
+const env = EnvSchema.parse(process.env)
 
 export const client = new Client({
   intents: [GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.Guilds],
@@ -84,6 +89,8 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.reply('Discord STT | Starting transcription in your voice channel!')
 
     const targetTextChannel = interaction.channel as TextChannel
+    const textChannelId = TextChannelIdSchema.parse(targetTextChannel.id)
+
     let connection
     try {
       connection = await connectToVoiceChannel(voiceChannel)
@@ -97,16 +104,17 @@ client.on('interactionCreate', async (interaction) => {
     const handleUserConnected = getUserConnectedHandler(
       connection.receiver,
       targetTextChannel,
-      voiceChannel
+      textChannelId,
+      voiceChannel,
+      voiceChannelId
     )
 
     // store metadata for proper cleanup
-    insertTranscription(voiceChannel, targetTextChannel, connection, handleUserConnected)
+    insertTranscription(voiceChannelId, textChannelId, connection, handleUserConnected)
 
     connection.receiver.speaking.on('start', handleUserConnected)
     for (const [rawUserId] of voiceChannel.members) {
-      const userId = UserIdSchema.parse(rawUserId)
-      handleUserConnected(userId)
+      handleUserConnected(rawUserId)
     }
   } else if (commandName === 'stop') {
     // Get the voice channel of the user who sent the command
@@ -145,6 +153,6 @@ async function shutdown() {
 process.on('SIGINT', shutdown)
 process.on('SIGTERM', shutdown)
 
-if (tokenResult.success) {
-  client.login(tokenResult.data)
+if (env.DISCORD_TOKEN) {
+  client.login(env.DISCORD_TOKEN)
 }
