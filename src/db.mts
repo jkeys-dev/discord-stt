@@ -1,14 +1,10 @@
 import pg from 'pg'
 import { z } from 'zod'
 import {
-  DatabaseUrlSchema,
   NewTranscriptionRecord,
-  NewTranscriptionRecordSchema,
-  QueryLimitSchema,
   TranscriptionRecord,
   TranscriptionRecordSchema,
   VoiceChannelId,
-  VoiceChannelIdSchema,
 } from './types.mjs'
 import { error, log } from './utils.mjs'
 
@@ -18,11 +14,9 @@ let pool: pg.Pool | undefined
 
 export function getPool(): pg.Pool {
   if (!pool) {
-    const databaseUrl = process.env.DATABASE_URL
-      ? DatabaseUrlSchema.parse(process.env.DATABASE_URL)
-      : undefined
-
-    pool = new Pool(databaseUrl ? { connectionString: databaseUrl } : undefined)
+    pool = new Pool(
+      process.env.DATABASE_URL ? { connectionString: process.env.DATABASE_URL } : undefined
+    )
     pool.on('error', (err) => {
       error('Unexpected PostgreSQL pool error:', err)
     })
@@ -54,9 +48,8 @@ export async function initDb(): Promise<void> {
 }
 
 export async function saveTranscription(
-  record: NewTranscriptionRecord | z.input<typeof NewTranscriptionRecordSchema>
+  record: NewTranscriptionRecord
 ): Promise<TranscriptionRecord> {
-  const validated = NewTranscriptionRecordSchema.parse(record)
   const db = getPool()
   const result = await db.query(
     `
@@ -80,12 +73,12 @@ export async function saveTranscription(
       created_at AS "createdAt"
     `,
     [
-      validated.guildId,
-      validated.voiceChannelId,
-      validated.textChannelId,
-      validated.userId,
-      validated.username,
-      validated.content,
+      record.guildId,
+      record.voiceChannelId,
+      record.textChannelId,
+      record.userId,
+      record.username,
+      record.content,
     ]
   )
   return TranscriptionRecordSchema.parse(result.rows[0])
@@ -95,8 +88,6 @@ export async function getRecentTranscriptions(
   voiceChannelId: VoiceChannelId,
   limit = 50
 ): Promise<TranscriptionRecord[]> {
-  const validChannelId = VoiceChannelIdSchema.parse(voiceChannelId)
-  const validLimit = QueryLimitSchema.parse(limit)
   const db = getPool()
   const result = await db.query(
     `
@@ -114,7 +105,7 @@ export async function getRecentTranscriptions(
     ORDER BY created_at DESC
     LIMIT $2
     `,
-    [validChannelId, validLimit]
+    [voiceChannelId, limit]
   )
   return z.array(TranscriptionRecordSchema).parse(result.rows)
 }

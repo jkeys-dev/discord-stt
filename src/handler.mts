@@ -12,14 +12,14 @@ import {
 } from './state.mjs'
 import {
   GuildIdSchema,
-  OpusPacketSchema,
   Pcm16kMonoBuffer,
-  Pcm16kMonoBufferSchema,
-  SpeakerContextSchema,
+  SpeakerContext,
+  TextChannelId,
   UserIdSchema,
-  UsernameSchema,
   VadStateSnapshot,
-  VoiceChannelIdSchema,
+  VoiceChannelId,
+  asOpusPacket,
+  asPcm16kMono,
 } from './types.mjs'
 import { error, log, transcodeAndSave } from './utils.mjs'
 import { createVadProcessor } from './vad.mjs'
@@ -27,10 +27,11 @@ import { createVadProcessor } from './vad.mjs'
 export function getUserConnectedHandler(
   receiver: VoiceReceiver,
   targetTextChannel: TextChannel,
-  voiceChannel: VoiceChannel
+  textChannelId: TextChannelId,
+  voiceChannel: VoiceChannel,
+  voiceChannelId: VoiceChannelId
 ) {
   assert(!!client.user, 'did not find user for bot')
-  const voiceChannelId = VoiceChannelIdSchema.parse(voiceChannel.id)
   const guildId = GuildIdSchema.parse(voiceChannel.guild.id)
 
   // Decode Opus directly to 16kHz mono 16-bit signed little-endian PCM via WASM OpusScript
@@ -53,13 +54,13 @@ export function getUserConnectedHandler(
       return
     }
 
-    const username = UsernameSchema.parse(user.username)
-    const speaker = SpeakerContextSchema.parse({
+    const username = user.username
+    const speaker: SpeakerContext = {
       guildId,
       voiceChannelId,
       userId,
       username,
-    })
+    }
 
     log(`listening to input from user ${username}`)
 
@@ -85,12 +86,12 @@ export function getUserConnectedHandler(
         return
       }
       transcoding = true
-      const audioBuffer = Pcm16kMonoBufferSchema.parse(Buffer.concat(packets))
+      const audioBuffer = asPcm16kMono(Buffer.concat(packets))
       clearUtteranceBuffer()
 
       try {
         log(`transcribing 16kHz mono PCM for ${username} (${audioBuffer.byteLength} bytes)`)
-        await transcodeAndSave(audioBuffer, speaker, targetTextChannel)
+        await transcodeAndSave(audioBuffer, speaker, targetTextChannel, textChannelId)
       } catch (err) {
         error(`transcription failed for ${username}`, err)
       } finally {
@@ -108,8 +109,8 @@ export function getUserConnectedHandler(
 
     function handlePacket(rawOpusPacket: Buffer) {
       try {
-        const opusPacket = OpusPacketSchema.parse(rawOpusPacket)
-        const decoded = Pcm16kMonoBufferSchema.parse(encoder.decode(opusPacket))
+        const opusPacket = asOpusPacket(rawOpusPacket)
+        const decoded = asPcm16kMono(encoder.decode(opusPacket))
         lastPacketTimestamp = Date.now()
 
         const vadState = vad.processFrame(decoded)
